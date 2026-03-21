@@ -192,12 +192,7 @@ async def get_results(presentation_id: str, request: Request) -> JSONResponse:
         )
 
     if status == ProcessingStatus.failed:
-        return _error(
-            "processing_failed",
-            record.get("error_message") or "An error occurred during processing",
-            500,
-            presentation_id=presentation_id,
-        )
+        return _error("not_found", "Presentation not found", 404)
 
     # status == completed
     results: PresentationResults = record["results"]
