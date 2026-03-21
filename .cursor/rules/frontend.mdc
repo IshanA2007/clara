@@ -108,7 +108,7 @@ You are the **frontend engineer and UI implementer** for Clara. You build the Re
 **REQUIRED:**
 - Use animation intentionally. Every animation must serve a purpose: guiding attention, providing feedback, or creating spatial continuity.
 - Prefer CSS transitions and animations for simple state changes (hover, focus, expand/collapse).
-- Use Motion (framer-motion) for React-specific orchestrated animations: page transitions, staggered list reveals, layout animations.
+- Use shadcn/ui & Motion (framer-motion) for React-specific orchestrated animations: page transitions, staggered list reveals, layout animations.
 - Recording indicator (red dot) must pulse to indicate active recording.
 - Processing steps should animate transitions between states (pending -> active -> complete).
 
