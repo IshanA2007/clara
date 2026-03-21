@@ -1,0 +1,189 @@
+@import 'tailwindcss';
+
+:root {
+  /* Backgrounds — warm, layered, never flat */
+  --bg-base: #FAF6F1;
+  --bg-elevated: #F3ECE4;
+  --bg-recessed: #EAE0D5;
+  --bg-deep: #3B1215;
+  --bg-deep-muted: #4A1E21;
+
+  /* Text */
+  --text-primary: #2C1810;
+  --text-secondary: #6B5547;
+  --text-tertiary: #9A8677;
+  --text-on-dark: #FAF6F1;
+  --text-on-dark-muted: #C4A98F;
+
+  /* Accent — burgundy family */
+  --accent: #7A2C30;
+  --accent-hover: #922F34;
+  --accent-muted: #7A2C3033;
+
+  /* Semantic — feedback category tags */
+  --cat-pacing: #2B5F8A;
+  --cat-repetition: #B5652A;
+  --cat-clarity: #3A7D5E;
+  --cat-diction: #6B4C8A;
+  --cat-structure: #7A7067;
+  --cat-timing: #A13B3B;
+
+  /* Semantic — pace badges */
+  --pace-slow: #B5862A;
+  --pace-normal: #3A7D5E;
+  --pace-fast: #B5862A;
+
+  /* Severity */
+  --severity-observation: var(--text-secondary);
+  --severity-suggestion: var(--accent);
+
+  /* Borders and dividers */
+  --border-subtle: #D9CFC4;
+  --border-strong: #B5A898;
+
+  /* Surfaces */
+  --surface-glass: rgba(250, 246, 241, 0.7);
+
+  /* Typography */
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+  --text-4xl: 3.5rem;
+
+  /* Spacing — 8px grid */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+
+  /* Border radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 16px;
+
+  /* Shadows — warm-toned */
+  --shadow-sm: 0 1px 3px rgba(44, 24, 16, 0.06);
+  --shadow-md: 0 4px 12px rgba(44, 24, 16, 0.08);
+  --shadow-lg: 0 8px 30px rgba(44, 24, 16, 0.12);
+  --shadow-inner: inset 0 1px 3px rgba(44, 24, 16, 0.06);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  background: var(--bg-base);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.bg-warm-gradient {
+  background: linear-gradient(165deg, var(--bg-base) 0%, #F0E4D8 40%, #E8D5C8 100%);
+}
+
+.bg-deep-gradient {
+  background: linear-gradient(165deg, var(--bg-deep) 0%, #4A1E21 50%, #2C1810 100%);
+}
+
+.textured {
+  position: relative;
+}
+
+.textured::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.category-label {
+  font-family: var(--font-body);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-size: var(--text-xs);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #D94040;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.results-grid {
+  display: grid;
+  grid-template-columns: 45% 55%;
+  gap: var(--space-5);
+}
+
+@media (max-width: 900px) {
+  .results-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.loading-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated) 25%,
+    var(--bg-recessed) 50%,
+    var(--bg-elevated) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
