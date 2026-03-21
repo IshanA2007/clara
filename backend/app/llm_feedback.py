@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 import requests
@@ -216,7 +217,7 @@ async def generate_llm_feedback(
     Returns a dict keyed by slide_id (e.g. "slide_0") with SlideFeedback values.
     Every input slide has a corresponding output entry.
     """
-    token = _get_snowflake_token()
+    token = await asyncio.to_thread(_get_snowflake_token)
 
     total_slides = len(slide_transcript)
     result: Dict[str, SlideFeedback] = {}
@@ -240,14 +241,14 @@ async def generate_llm_feedback(
             slide_word_count=len(slide.words),
         )
 
-        # First attempt
+        # First attempt — run blocking Cortex call off the event loop
         try:
-            raw = _call_cortex(token, SYSTEM_PROMPT, user_prompt)
+            raw = await asyncio.to_thread(_call_cortex, token, SYSTEM_PROMPT, user_prompt)
             feedback_items = _parse_llm_response(raw)
         except json.JSONDecodeError:
             # Retry once on invalid JSON
             try:
-                raw = _call_cortex(token, SYSTEM_PROMPT, user_prompt)
+                raw = await asyncio.to_thread(_call_cortex, token, SYSTEM_PROMPT, user_prompt)
                 feedback_items = _parse_llm_response(raw)
             except (json.JSONDecodeError, Exception):
                 feedback_items = []

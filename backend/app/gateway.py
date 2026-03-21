@@ -175,7 +175,8 @@ async def create_presentation(
         "error_message": None,
     }
 
-    asyncio.create_task(_run_pipeline(presentation_id, audio_bytes, meta, presentations))
+    task = asyncio.create_task(_run_pipeline(presentation_id, audio_bytes, meta, presentations))
+    presentations[presentation_id]["_task"] = task  # prevent garbage collection
 
     return JSONResponse(
         status_code=202,

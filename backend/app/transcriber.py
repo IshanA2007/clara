@@ -1,10 +1,12 @@
+import asyncio
+
 import openai
 from app.config import OPENAI_API_KEY
 from app.models import WordTimestamp
 
 
-async def transcribe_audio(audio_path: str) -> dict:
-    """Call OpenAI Whisper API. Returns dict with keys: words, text, duration."""
+def _transcribe_sync(audio_path: str) -> dict:
+    """Blocking Whisper API call — run via asyncio.to_thread."""
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
     with open(audio_path, "rb") as audio_file:
@@ -25,3 +27,8 @@ async def transcribe_audio(audio_path: str) -> dict:
         "text": response.text or "",
         "duration": response.duration or 0.0,
     }
+
+
+async def transcribe_audio(audio_path: str) -> dict:
+    """Call OpenAI Whisper API without blocking the event loop."""
+    return await asyncio.to_thread(_transcribe_sync, audio_path)
