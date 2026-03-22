@@ -71,20 +71,20 @@ const CAPABILITIES = [
   {
     title: 'Words Per Minute',
     description: 'Per-slide pace measurement calibrated to your chosen tone — formal, casual, informative, or persuasive — each with its own benchmarks.',
-    color: 'var(--cat-pacing)',
-    tag: 'pacing',
+    color: '#2B5F8A',
+    tag: 'metrics',
   },
   {
     title: 'Filler Word Detection',
     description: 'Catches um, uh, like, you know, basically, actually, literally, right, I mean, kind of, and sort of. Every instance timestamped.',
-    color: 'var(--cat-diction)',
-    tag: 'diction',
+    color: '#6B4C8A',
+    tag: 'detection',
   },
   {
     title: 'Pause Analysis',
     description: 'Identifies pauses that exceed tone-appropriate thresholds. A 2-second pause in a formal talk is notable; in casual conversation, it\'s nothing.',
-    color: 'var(--cat-timing)',
-    tag: 'timing',
+    color: '#A13B3B',
+    tag: 'analysis',
   },
   {
     title: 'Repetition Tracking',
@@ -94,15 +94,15 @@ const CAPABILITIES = [
   },
   {
     title: 'Targeted Feedback',
-    description: 'AI-generated observations grounded in your transcript. No generic encouragement — every comment references specific words, slides, and patterns.',
-    color: 'var(--cat-clarity)',
-    tag: 'clarity',
+    description: 'AI-generated flags grounded in your transcript. No generic encouragement — every flag references specific words, slides, and patterns.',
+    color: 'var(--cat-hedge-stack)',
+    tag: 'feedback',
   },
   {
     title: 'Slide-by-Slide Breakdown',
     description: 'Every metric and feedback item is scoped to a single slide. See exactly where your presentation is strong and where it needs work.',
-    color: 'var(--cat-structure)',
-    tag: 'structure',
+    color: 'var(--cat-slide-reading)',
+    tag: 'breakdown',
   },
 ];
 

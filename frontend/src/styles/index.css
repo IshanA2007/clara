@@ -20,13 +20,11 @@
   --accent-hover: #922F34;
   --accent-muted: #7A2C3033;
 
-  /* Semantic — feedback category tags */
-  --cat-pacing: #2B5F8A;
+  /* Semantic — feedback flag tags */
   --cat-repetition: #B5652A;
-  --cat-clarity: #3A7D5E;
-  --cat-diction: #6B4C8A;
-  --cat-structure: #7A7067;
-  --cat-timing: #A13B3B;
+  --cat-hedge-stack: #6B4C8A;
+  --cat-false-start: #A13B3B;
+  --cat-slide-reading: #2B5F8A;
 
   /* Semantic — pace badges */
   --pace-slow: #B5862A;

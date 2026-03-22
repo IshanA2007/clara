@@ -26,10 +26,14 @@ async function parseErrorResponse(res: Response): Promise<ApiError> {
 export async function submitPresentation(
   audio: Blob,
   metadata: PresentationMetadata,
+  slides?: File | null,
 ): Promise<SubmitResponse> {
   const formData = new FormData();
   formData.append('audio', audio, 'recording.webm');
   formData.append('metadata', JSON.stringify(metadata));
+  if (slides) {
+    formData.append('slides', slides, slides.name);
+  }
 
   const res = await fetch(`${BASE_URL}/presentations`, {
     method: 'POST',

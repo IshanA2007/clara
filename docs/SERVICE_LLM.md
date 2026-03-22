@@ -77,28 +77,77 @@ Then use `Authorization: Bearer {token}` on Cortex REST calls.
 
 ---
 
+## Purpose and Scope
+
+The LLM exists to catch **language-level patterns that regex and counting cannot detect**. It does NOT duplicate the deterministic analytics layer (WPM, filler words, pauses, repeated phrases via n-gram counting). It does NOT provide subjective style critiques or encouragement.
+
+---
+
+## Allowed Flag Types
+
+Exactly 4 flag types. No others are permitted.
+
+### REPETITION
+The same phrase or sentence structure repeated **across slides** (not within a single slide — the deterministic n-gram counter handles intra-slide repetition). Example: "the key thing is" appears on slides 2, 4, and 6.
+
+### HEDGE_STACK
+Multiple hedging words piled into the **same sentence** (3 or more). Individual hedges ("maybe", "probably") are fine and not flagged. Example: "I sort of kind of think maybe we should probably consider this."
+
+### FALSE_START
+Speaker begins a sentence, abandons it, and restarts. Example: "So the architecture is — well actually the way we built it is — so basically the architecture..."
+
+### SLIDE_READING
+Transcript closely matches the slide text verbatim. Only flag this if slide text (from PDF extraction) is provided in the input. Compare the transcript segment to the slide text and flag if the speaker is clearly just reading the slide word-for-word.
+
+### Killed Flag Types
+
+These are **permanently removed** and must never appear:
+
+- ~~CLARITY~~ — too subjective, LLM invents problems
+- ~~DICTION~~ — style policing nobody asked for
+- ~~STRUCTURE~~ — "abrupt transition" is not measurable
+- ~~TIMING~~ — restates duration stat from metrics
+- ~~PACING~~ — restates WPM stat from metrics
+- Any positive feedback, encouragement, or "good job" comments
+
+---
+
 ## Prompt Structure
 
 Each slide gets its own API call. The prompt includes:
 1. Full presentation context (for cross-slide awareness)
-2. The specific slide to analyze
-3. Presentation expectations
-4. Strict output format instructions
+2. The specific slide transcript to analyze
+3. The slide text from PDF (if available, for SLIDE_READING detection)
+4. Presentation expectations (tone used only to calibrate hedge stacking severity)
+5. Strict output format instructions
 
 ### System Prompt
 
 ```
-You are a presentation speech analyst. Your role is to provide specific,
-data-grounded feedback on speaking patterns observed in presentation transcripts.
+You are a presentation transcript analyzer. You detect language-level patterns
+that a word-counting algorithm cannot.
+
+You may ONLY return these flag types:
+- REPETITION: A phrase or sentence structure repeated across multiple slides
+  (not within a single slide). Example: "the key thing is" on slides 2, 4, 6.
+- HEDGE_STACK: Three or more hedging words in the same sentence. Individual
+  hedges are fine. Example: "I sort of kind of think maybe we should probably..."
+- FALSE_START: Speaker begins a sentence, abandons it, restarts. Example:
+  "So the architecture is — well actually the way we built it is — so basically..."
+- SLIDE_READING: Speaker reads the slide text nearly verbatim. Only flag if
+  slide text is provided and the transcript closely matches it.
 
 Rules:
-- Every comment MUST reference specific words, phrases, or patterns from the transcript
-- Do NOT give generic advice like "try to be more engaging" or "good job"
-- Do NOT rate the quality of the content or ideas
-- Do NOT give encouragement or praise
-- Focus ONLY on observable speaking behaviors: word choice, repetition, pacing patterns, clarity of phrasing, structural transitions
-- Each comment must be under 200 characters
-- Respond ONLY with valid JSON — no markdown, no explanation
+- If nothing notable is found, return an empty array. Do not force feedback.
+- Return at most 2 flags per slide.
+- Do not flag short slide durations, speaking pace, or word count — these are
+  already shown in metrics.
+- Do not provide positive feedback, encouragement, or suggestions.
+- Do not comment on grammar, vocabulary choices, or formality unless the
+  transcript shows hedge stacking.
+- Only flag patterns that a word-counting algorithm could not detect.
+- Each flag must reference specific words or phrases from the transcript.
+- Respond ONLY with a valid JSON array — no markdown, no explanation, no preamble.
 ```
 
 ### User Prompt Template
@@ -106,38 +155,52 @@ Rules:
 ```
 PRESENTATION CONTEXT:
 - Tone: {tone}
-- Expected duration: {expected_duration_minutes} minutes
 - Context: {context}
 
-FULL PRESENTATION TRANSCRIPT (for reference across slides):
+FULL PRESENTATION TRANSCRIPT (for cross-slide repetition detection):
 {full_transcript}
 
-SLIDE {slide_index + 1} OF {total_slides}:
-Transcript: "{slide_text}"
-Duration: {slide_duration} seconds
-Word count: {slide_word_count}
+SLIDE {slide_number} OF {total_slides}:
+Transcript: "{slide_transcript}"
+{slide_text_section}
 
-Analyze ONLY Slide {slide_index + 1}. Consider repetition and patterns relative to the rest of the presentation.
-
-Categories to evaluate:
-- repetition: repeated words or phrases within this slide or across the presentation
-- clarity: unclear or convoluted phrasing
-- diction: word choice issues, overly complex or informal language for the tone
-- pacing: observations about information density relative to slide duration
-- structure: how the speaker transitions into or out of this slide
-- timing: time spent on this slide relative to its content
-
-Respond with a JSON array of feedback objects. Maximum 5 items. If few issues found, return fewer items.
+Analyze ONLY Slide {slide_number}. Return a JSON array of flags.
 
 Format:
 [
   {
-    "category": "repetition|clarity|diction|pacing|structure|timing",
-    "comment": "specific observation under 200 characters",
-    "severity": "observation|suggestion"
+    "type": "REPETITION|HEDGE_STACK|FALSE_START|SLIDE_READING",
+    "text": "the specific words or phrase flagged",
+    "detail": "brief explanation under 200 characters"
   }
 ]
 ```
+
+The `{slide_text_section}` is conditionally included:
+- If slide text is available: `Slide text (from PDF): "{slide_text}"`
+- If not available: omitted entirely
+
+**Note:** `slide_duration` and `slide_word_count` are intentionally excluded from the prompt to prevent the LLM from commenting on metrics.
+
+---
+
+## PDF Text Extraction
+
+To support SLIDE_READING detection, the pipeline extracts text from each PDF slide page using PyMuPDF (`fitz`).
+
+```python
+import fitz  # PyMuPDF
+
+def extract_slide_texts(pdf_path: str, total_slides: int) -> Dict[str, str]:
+    doc = fitz.open(pdf_path)
+    slide_texts = {}
+    for i in range(min(total_slides, len(doc))):
+        slide_texts[f"slide_{i}"] = doc[i].get_text().strip()
+    doc.close()
+    return slide_texts
+```
+
+This runs once per presentation before the analysis phase. The resulting dict is passed to `generate_llm_feedback()`.
 
 ---
 
@@ -148,6 +211,7 @@ The LLM is called N times for N slides. Each call:
 1. Receives the full presentation transcript as context
 2. Is told to focus only on the current slide
 3. Can reference patterns across slides (e.g., "the phrase X also appears on slides 2 and 5")
+4. Receives the PDF slide text for that page (if available)
 
 **Why per-slide calls instead of one bulk call:**
 - Better focus and specificity per slide
@@ -157,28 +221,17 @@ The LLM is called N times for N slides. Each call:
 
 ---
 
-## Repetition Detection Across Slides
-
-The LLM has the full transcript, so it can identify:
-- Phrases repeated on multiple slides (e.g., "as I mentioned earlier" used 4 times)
-- Opening patterns that repeat (starting every slide with "So...")
-- Structural repetition (same transition every time)
-
-The system prompt explicitly asks for cross-slide awareness while focusing analysis on the current slide.
-
----
-
 ## Concise Feedback Format
 
 Each feedback item:
 
 | Field | Type | Constraints |
 |-------|------|-------------|
-| `category` | string | One of: `pacing`, `repetition`, `clarity`, `diction`, `structure`, `timing` |
-| `comment` | string | Max 200 characters. Must reference specific transcript content. |
-| `severity` | string | `observation` (neutral data point) or `suggestion` (actionable change) |
+| `type` | string | One of: `REPETITION`, `HEDGE_STACK`, `FALSE_START`, `SLIDE_READING` |
+| `text` | string | The specific words or phrase flagged from the transcript. Max 200 chars. |
+| `detail` | string | Brief explanation. Max 200 characters. |
 
-**Maximum 5 feedback items per slide.** If the LLM returns more, truncate to first 5.
+**Maximum 2 feedback items per slide.** If the LLM returns more, truncate to first 2.
 
 ---
 
@@ -187,6 +240,8 @@ Each feedback item:
 The LLM must return a JSON array. Parse and validate:
 
 ```python
+VALID_TYPES = {"REPETITION", "HEDGE_STACK", "FALSE_START", "SLIDE_READING"}
+
 def parse_llm_response(raw_response: str) -> List[FeedbackItem]:
     # Strip any markdown code fences if present
     cleaned = raw_response.strip()
@@ -196,13 +251,18 @@ def parse_llm_response(raw_response: str) -> List[FeedbackItem]:
     items = json.loads(cleaned)
 
     validated = []
-    for item in items[:5]:  # Max 5
-        if item.get("category") not in VALID_CATEGORIES:
+    for item in items[:2]:  # Max 2
+        if item.get("type") not in VALID_TYPES:
             continue
-        if item.get("severity") not in ["observation", "suggestion"]:
-            item["severity"] = "observation"
-        if len(item.get("comment", "")) > 200:
-            item["comment"] = item["comment"][:197] + "..."
+        text = item.get("text", "")
+        detail = item.get("detail", "")
+        if len(text) > 200:
+            text = text[:197] + "..."
+        if len(detail) > 200:
+            detail = detail[:197] + "..."
+        # Filter banned phrases
+        if not filter_generic(detail):
+            continue
         validated.append(item)
 
     return validated
@@ -217,12 +277,13 @@ These constraints are enforced in the system prompt and validated post-response:
 | Constraint | Enforcement |
 |-----------|-------------|
 | No praise or encouragement | System prompt rule. Filter responses containing "great", "excellent", "good job", "well done" |
-| No content evaluation | System prompt rule. Filter responses about idea quality |
-| Must reference transcript | System prompt rule. Flag comments that don't quote or reference specific words |
-| No numerical quality scores | System prompt rule. The LLM should not output scores like "clarity: 7/10" |
-| Under 200 characters | Post-processing truncation |
-| Valid category | Post-processing validation |
-| Max 5 per slide | Post-processing truncation |
+| No metrics commentary | System prompt rule. No duration, WPM, or word count observations |
+| No grammar/style policing | System prompt rule. Only hedge stacking triggers language critique |
+| Must reference transcript | System prompt rule. `text` field must contain actual words from transcript |
+| Only 4 flag types | Post-processing validation. Unknown types silently dropped |
+| Under 200 characters | Post-processing truncation on both `text` and `detail` |
+| Max 2 per slide | Post-processing truncation |
+| Empty array for clean slides | System prompt rule. No forced feedback |
 
 **Post-processing filters:**
 
@@ -233,9 +294,9 @@ BANNED_PHRASES = [
     "try to be more", "consider being more", "you should try"
 ]
 
-def filter_generic(comment: str) -> bool:
-    """Return True if comment should be kept."""
-    lower = comment.lower()
+def filter_generic(text: str) -> bool:
+    """Return True if text should be kept."""
+    lower = text.lower()
     return not any(phrase in lower for phrase in BANNED_PHRASES)
 ```
 
@@ -246,10 +307,11 @@ def filter_generic(comment: str) -> bool:
 The module returns a dict keyed by slide ID:
 
 ```python
-def generate_llm_feedback(
+async def generate_llm_feedback(
     slide_transcript: Dict[str, SlideTranscript],
     expectations: Expectations,
-    full_text: str
+    full_text: str,
+    slide_texts: Dict[str, str],
 ) -> Dict[str, SlideFeedback]:
 ```
 
@@ -259,9 +321,9 @@ def generate_llm_feedback(
   "slide_0": {
     "feedback": [
       {
-        "category": "repetition",
-        "comment": "The phrase 'climate change' appears 3 times in 45 seconds.",
-        "severity": "observation"
+        "type": "REPETITION",
+        "text": "You know",
+        "detail": "Phrase 'You know' appears on slides 2, 5, and 7"
       }
     ]
   },
@@ -281,7 +343,7 @@ Every slide in the input must have a corresponding entry in the output, even if 
 |-------|----------|
 | Cortex API returns non-200 | Retry once after 2 seconds. If still failing, raise exception (pipeline marks presentation as `failed`) |
 | LLM returns invalid JSON | Retry once with same prompt. If still invalid, return empty feedback for that slide |
-| LLM returns too many items | Truncate to 5 |
+| LLM returns too many items | Truncate to 2 |
 | LLM returns banned phrases | Filter them out silently |
 | Cortex rate limit (429) | Wait 5 seconds, retry once |
 | Empty slide (no transcript) | Skip LLM call, return `{"feedback": []}` |

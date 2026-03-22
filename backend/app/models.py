@@ -15,17 +15,11 @@ class SpeakingPace(str, Enum):
     normal = "normal"
     fast = "fast"
 
-class FeedbackCategory(str, Enum):
-    pacing = "pacing"
-    repetition = "repetition"
-    clarity = "clarity"
-    diction = "diction"
-    structure = "structure"
-    timing = "timing"
-
-class Severity(str, Enum):
-    observation = "observation"
-    suggestion = "suggestion"
+class FeedbackType(str, Enum):
+    repetition = "REPETITION"
+    hedge_stack = "HEDGE_STACK"
+    false_start = "FALSE_START"
+    slide_reading = "SLIDE_READING"
 
 class ProcessingStatus(str, Enum):
     processing = "processing"
@@ -102,9 +96,9 @@ class SlideMetrics(BaseModel):
 # --- LLM feedback output ---
 
 class FeedbackItem(BaseModel):
-    category: FeedbackCategory
-    comment: str = Field(max_length=200)
-    severity: Severity
+    type: FeedbackType
+    text: str = Field(max_length=200)
+    detail: str = Field(max_length=200)
 
 class SlideFeedback(BaseModel):
     feedback: List[FeedbackItem]

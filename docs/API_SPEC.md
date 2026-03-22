@@ -49,6 +49,7 @@ Submit a recorded presentation for analysis.
 |-------|------|----------|-------------|
 | `audio` | File (binary) | Yes | Audio recording. Accepted formats: `audio/webm`, `audio/wav`, `audio/mp4` |
 | `metadata` | String (JSON) | Yes | JSON string containing slide timestamps and expectations |
+| `slides` | File (binary) | No | PDF file of the presentation slides. Used for SLIDE_READING detection. If omitted, SLIDE_READING flags are not generated. |
 
 **metadata JSON structure:**
 

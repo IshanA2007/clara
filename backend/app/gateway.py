@@ -4,7 +4,9 @@ import logging
 import os
 import tempfile
 import uuid
-from typing import Any
+from typing import Any, Dict, Optional
+
+import fitz  # PyMuPDF
 
 logger = logging.getLogger("clara.pipeline")
 
@@ -41,11 +43,22 @@ STAGE_STEPS: dict[str, tuple[int, str]] = {
 }
 
 
+def _extract_slide_texts(pdf_bytes: bytes, total_slides: int) -> Dict[str, str]:
+    """Extract text from each page of a PDF. Returns dict keyed by slide_id."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    slide_texts: Dict[str, str] = {}
+    for i in range(min(total_slides, len(doc))):
+        slide_texts[f"slide_{i}"] = doc[i].get_text().strip()
+    doc.close()
+    return slide_texts
+
+
 async def _run_pipeline(
     presentation_id: str,
     audio_bytes: bytes,
     metadata: PresentationMetadata,
     presentations: dict,
+    pdf_bytes: Optional[bytes] = None,
 ) -> None:
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as f:
@@ -93,11 +106,18 @@ async def _run_pipeline(
                     repr(st.text[:80]) if st.text else "(empty)",
                 )
 
+            # Extract slide text from PDF (if provided) for SLIDE_READING detection
+            slide_texts: Dict[str, str] = {}
+            if pdf_bytes:
+                slide_texts = await asyncio.to_thread(
+                    _extract_slide_texts, pdf_bytes, metadata.total_slides
+                )
+
             # Stage: analyzing (step 4/5) — parallel
             presentations[presentation_id]["stage"] = PipelineStage.analyzing
             metrics, feedback = await asyncio.gather(
                 asyncio.to_thread(compute_manual_analytics, indexed, metadata.expectations),
-                generate_llm_feedback(indexed, metadata.expectations, whisper_result["text"]),
+                generate_llm_feedback(indexed, metadata.expectations, whisper_result["text"], slide_texts),
             )
 
             # Stage: aggregating (step 5/5)
@@ -141,6 +161,7 @@ async def create_presentation(
     request: Request,
     audio: UploadFile = File(...),
     metadata: str = Form(...),
+    slides: Optional[UploadFile] = File(None),
 ) -> JSONResponse:
     # --- Audio validation ---
     audio_bytes = await audio.read()
@@ -205,7 +226,14 @@ async def create_presentation(
         "error_message": None,
     }
 
-    task = asyncio.create_task(_run_pipeline(presentation_id, audio_bytes, meta, presentations))
+    # Read optional PDF for SLIDE_READING detection
+    pdf_bytes: Optional[bytes] = None
+    if slides is not None:
+        pdf_bytes = await slides.read()
+        if not pdf_bytes:
+            pdf_bytes = None
+
+    task = asyncio.create_task(_run_pipeline(presentation_id, audio_bytes, meta, presentations, pdf_bytes))
     presentations[presentation_id]["_task"] = task  # prevent garbage collection
 
     return JSONResponse(

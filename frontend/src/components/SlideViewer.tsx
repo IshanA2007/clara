@@ -52,7 +52,7 @@ export default function SlideViewer({ file, pageNumber, width }: SlideViewerProp
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--cat-timing)',
+          color: '#A13B3B',
           fontFamily: 'var(--font-body)',
           fontSize: 'var(--text-sm)',
         }}

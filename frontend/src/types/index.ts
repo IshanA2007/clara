@@ -82,9 +82,9 @@ export interface SlideMetrics {
 }
 
 export interface FeedbackItem {
-  category: 'pacing' | 'repetition' | 'clarity' | 'diction' | 'structure' | 'timing';
-  comment: string;
-  severity: 'observation' | 'suggestion';
+  type: 'REPETITION' | 'HEDGE_STACK' | 'FALSE_START' | 'SLIDE_READING';
+  text: string;
+  detail: string;
 }
 
 export interface SlideResult {
@@ -124,7 +124,7 @@ export interface ApiError {
   presentation_id?: string;
 }
 
-export type FeedbackCategory = FeedbackItem['category'];
+export type FeedbackType = FeedbackItem['type'];
 export type SpeakingPace = SlideMetrics['speaking_pace'];
 export type Tone = PresentationExpectations['tone'];
 export type ProcessingStage = StatusResponseProcessing['stage'];

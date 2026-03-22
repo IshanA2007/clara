@@ -203,38 +203,44 @@ Output of the Manual Analytics module.
 
 ## 6. LLM Feedback Output (Per Slide)
 
-Output of the Snowflake Cortex LLM module.
+Output of the Snowflake Cortex LLM module. The LLM catches language-level patterns that regex/counting cannot detect. It does not duplicate deterministic metrics.
 
 ```json
 {
   "slide_0": {
     "feedback": [
       {
-        "category": "pacing",
-        "comment": "Speaking pace of 112 WPM is below the 130-160 WPM range typical for formal presentations.",
-        "severity": "observation"
-      },
-      {
-        "category": "repetition",
-        "comment": "The phrase 'climate change' appears 3 times in 45 seconds. Consider synonyms.",
-        "severity": "suggestion"
+        "type": "REPETITION",
+        "text": "You know",
+        "detail": "Phrase 'You know' appears on slides 2, 5, and 7"
       }
     ]
+  },
+  "slide_1": {
+    "feedback": []
   }
 }
 ```
 
 | Field | Type | Values | Description |
 |-------|------|--------|-------------|
-| `category` | string | `"pacing"`, `"repetition"`, `"clarity"`, `"diction"`, `"structure"`, `"timing"` | Feedback domain |
-| `comment` | string | max 200 chars | Specific, data-grounded observation |
-| `severity` | string | `"observation"`, `"suggestion"` | Neutral vs actionable |
+| `type` | string | `"REPETITION"`, `"HEDGE_STACK"`, `"FALSE_START"`, `"SLIDE_READING"` | Flag type |
+| `text` | string | max 200 chars | The specific words or phrase flagged from the transcript |
+| `detail` | string | max 200 chars | Brief explanation of the issue |
+
+**Flag type definitions:**
+- `REPETITION` — same phrase/structure repeated across multiple slides (not within a single slide)
+- `HEDGE_STACK` — 3+ hedging words in the same sentence
+- `FALSE_START` — speaker begins a sentence, abandons it, restarts
+- `SLIDE_READING` — transcript closely matches PDF slide text verbatim (only when slide text is available)
 
 **Constraints:**
-- Maximum 5 feedback items per slide
-- Each comment must reference specific words, phrases, or metrics from the transcript
-- No generic encouragement or subjective quality ratings
-- Comments must be under 200 characters
+- Maximum 2 feedback items per slide
+- Each flag must reference specific words or phrases from the transcript
+- No metrics commentary (duration, WPM, word count)
+- No encouragement, praise, or subjective quality ratings
+- No grammar/vocabulary critique unless hedge stacking
+- Clean slides return an empty array — feedback is never forced
 
 ---
 
@@ -288,9 +294,9 @@ The complete results object returned by `GET /api/presentations/{id}/results`.
       },
       "feedback": [
         {
-          "category": "pacing",
-          "comment": "Speaking pace of 112 WPM is below typical range for formal presentations.",
-          "severity": "observation"
+          "type": "REPETITION",
+          "text": "climate change",
+          "detail": "Phrase 'climate change' also appears on slides 2 and 4"
         }
       ]
     }
