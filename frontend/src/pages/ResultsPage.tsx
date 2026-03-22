@@ -227,6 +227,7 @@ export default function ResultsPage() {
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'flex-start',
+              minWidth: 0,
             }}
           >
             <SlideViewer

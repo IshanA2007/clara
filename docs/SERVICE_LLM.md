@@ -50,7 +50,7 @@ SNOWFLAKE_WAREHOUSE=<warehouse>
 
 **Model selection:** Use `mistral-large2` or `llama3.1-70b` (available on Cortex). Prefer `mistral-large2` for better instruction following. Make model configurable via environment variable `CORTEX_MODEL`.
 
-**Temperature:** 0.3 — low enough for consistency, high enough to avoid degenerate repetition.
+**Temperature:** 0.1 — very low for maximum consistency. Pre-computed evidence grounds the LLM so creativity is not needed.
 
 ### Authentication Flow
 
@@ -112,42 +112,60 @@ These are **permanently removed** and must never appear:
 
 ---
 
-## Prompt Structure
+## Evidence-Grounded Prompt Architecture
 
-Each slide gets its own API call. The prompt includes:
-1. Full presentation context (for cross-slide awareness)
-2. The specific slide transcript to analyze
-3. The slide text from PDF (if available, for SLIDE_READING detection)
-4. Presentation expectations (tone used only to calibrate hedge stacking severity)
-5. Strict output format instructions
+The LLM is unreliable when asked to discover patterns from raw text alone. To ensure consistent, accurate output, the module pre-computes algorithmic evidence and provides it alongside the transcript, so the LLM's role is to **synthesize and interpret** pre-validated data rather than discover patterns unaided.
+
+### Pre-Computation Phase (runs before any LLM call)
+
+1. **Annotated Transcript**: The full transcript is formatted with `[Slide N]` markers so the LLM can see slide boundaries. This prevents the LLM from guessing where slides start and end.
+
+2. **Cross-Slide N-gram Repetitions**: An algorithmic pass finds n-grams (3–6 words) that appear on 2+ distinct slides. These are provided as evidence for REPETITION flags. If no algorithmic repetitions are found, the LLM is explicitly told NOT to flag REPETITION.
+
+3. **Transcript-to-Slide Similarity**: A word-overlap coefficient is computed between the spoken transcript and PDF slide text. SLIDE_READING is only enabled when similarity ≥ 0.5.
+
+### Post-Validation Phase (runs after each LLM response)
+
+1. **Quote Verification**: The `text` field must appear verbatim in the slide's transcript. Flags with fabricated quotes are silently dropped.
+2. **REPETITION Verification**: The flagged phrase must match a pre-computed cross-slide n-gram. Hallucinated repetitions are dropped.
+3. **SLIDE_READING Verification**: The similarity score must be ≥ 0.5 and slide text must be present. Otherwise the flag is dropped.
 
 ### System Prompt
 
 ```
-You are a presentation transcript analyzer. You detect language-level patterns
-that a word-counting algorithm cannot.
+You are a precise presentation transcript analyzer. You identify specific
+language-level patterns that a word-counting algorithm cannot detect.
 
-You may ONLY return these flag types:
-- REPETITION: A phrase or sentence structure repeated across multiple slides
-  (not within a single slide). Example: "the key thing is" on slides 2, 4, 6.
-- HEDGE_STACK: Three or more hedging words in the same sentence. Individual
-  hedges are fine. Example: "I sort of kind of think maybe we should probably..."
-- FALSE_START: Speaker begins a sentence, abandons it, restarts. Example:
-  "So the architecture is — well actually the way we built it is — so basically..."
-- SLIDE_READING: Speaker reads the slide text nearly verbatim. Only flag if
-  slide text is provided and the transcript closely matches it.
+## ALLOWED FLAG TYPES (only these four):
 
-Rules:
-- If nothing notable is found, return an empty array. Do not force feedback.
+REPETITION — The same phrase or sentence structure appears across MULTIPLE slides
+(not within one slide). You will be given pre-computed repeated n-grams as evidence.
+Only flag REPETITION if the pre-computed data confirms the phrase appears on 2+ slides.
+If no pre-computed repetitions are provided, do NOT flag REPETITION.
+
+HEDGE_STACK — Three or more hedging words piled into the SAME sentence. Individual
+hedges (one "maybe" or one "probably") are normal and must NOT be flagged.
+Only flag when 3+ hedges cluster together. Examples of hedge words: maybe, probably,
+sort of, kind of, I think, I guess, perhaps, might, could, somewhat, a little bit.
+
+FALSE_START — Speaker starts a sentence, abandons it mid-thought, then restarts.
+Must show a clear break and restart. Pausing is NOT a false start. Filler words
+alone are NOT false starts. Look for interrupted syntax.
+
+SLIDE_READING — Speaker reads the slide text nearly word-for-word. ONLY flag this
+when slide text (from PDF) is explicitly provided AND a similarity score is given.
+If no slide text is provided, NEVER flag SLIDE_READING. If the similarity score is
+below 0.5, do NOT flag SLIDE_READING.
+
+## RULES:
+- If no patterns are found, return an EMPTY array []. Never force feedback.
 - Return at most 2 flags per slide.
-- Do not flag short slide durations, speaking pace, or word count — these are
-  already shown in metrics.
-- Do not provide positive feedback, encouragement, or suggestions.
-- Do not comment on grammar, vocabulary choices, or formality unless the
-  transcript shows hedge stacking.
-- Only flag patterns that a word-counting algorithm could not detect.
-- Each flag must reference specific words or phrases from the transcript.
-- Respond ONLY with a valid JSON array — no markdown, no explanation, no preamble.
+- The "text" field MUST contain an exact quote from the slide's transcript.
+- Do NOT flag speaking pace, word count, duration, filler words, or pauses.
+- Do NOT provide encouragement, praise, or suggestions.
+- Do NOT flag grammar, vocabulary, or style choices.
+- ONLY flag patterns with clear, specific evidence from the transcript.
+- Respond ONLY with a valid JSON array. No markdown fences, no explanation.
 ```
 
 ### User Prompt Template
@@ -157,30 +175,33 @@ PRESENTATION CONTEXT:
 - Tone: {tone}
 - Context: {context}
 
-FULL PRESENTATION TRANSCRIPT (for cross-slide repetition detection):
-{full_transcript}
+FULL PRESENTATION TRANSCRIPT (with slide boundaries):
+{annotated_transcript}
 
-SLIDE {slide_number} OF {total_slides}:
+---
+
+ANALYZING SLIDE {slide_number} OF {total_slides}:
 Transcript: "{slide_transcript}"
-{slide_text_section}
+{evidence_section}
+Based ONLY on the evidence above, return a JSON array of flags for Slide {slide_number}.
 
-Analyze ONLY Slide {slide_number}. Return a JSON array of flags.
+Each flag must have:
+- "type": one of REPETITION, HEDGE_STACK, FALSE_START, SLIDE_READING
+- "text": exact quote from THIS slide's transcript (Slide {slide_number})
+- "detail": explanation under 200 characters
 
-Format:
-[
-  {
-    "type": "REPETITION|HEDGE_STACK|FALSE_START|SLIDE_READING",
-    "text": "the specific words or phrase flagged",
-    "detail": "brief explanation under 200 characters"
-  }
-]
+If nothing qualifies, return: []
 ```
 
-The `{slide_text_section}` is conditionally included:
-- If slide text is available: `Slide text (from PDF): "{slide_text}"`
-- If not available: omitted entirely
+The `{evidence_section}` is dynamically built and includes:
+- **Pre-computed cross-slide repetitions** relevant to this slide, or an explicit "None detected" message
+- **Slide text + similarity score** (if PDF text available), or an explicit "Not available" message
 
 **Note:** `slide_duration` and `slide_word_count` are intentionally excluded from the prompt to prevent the LLM from commenting on metrics.
+
+### Temperature
+
+`0.1` — lowered from 0.3 for maximum consistency. The pre-computed evidence reduces the need for LLM creativity.
 
 ---
 
@@ -208,10 +229,10 @@ This runs once per presentation before the analysis phase. The resulting dict is
 
 The LLM is called N times for N slides. Each call:
 
-1. Receives the full presentation transcript as context
+1. Receives the full annotated transcript (with `[Slide N]` markers) as context
 2. Is told to focus only on the current slide
-3. Can reference patterns across slides (e.g., "the phrase X also appears on slides 2 and 5")
-4. Receives the PDF slide text for that page (if available)
+3. Receives pre-computed cross-slide n-gram repetitions relevant to this slide
+4. Receives the PDF slide text and computed similarity score (if available)
 
 **Why per-slide calls instead of one bulk call:**
 - Better focus and specificity per slide
@@ -272,18 +293,34 @@ def parse_llm_response(raw_response: str) -> List[FeedbackItem]:
 
 ## Constraints to Avoid Generic AI Feedback
 
-These constraints are enforced in the system prompt and validated post-response:
+These constraints are enforced through three layers: prompt design, pre-computed evidence, and post-validation.
 
+### Layer 1: Prompt Design
 | Constraint | Enforcement |
 |-----------|-------------|
-| No praise or encouragement | System prompt rule. Filter responses containing "great", "excellent", "good job", "well done" |
+| No praise or encouragement | System prompt rule |
 | No metrics commentary | System prompt rule. No duration, WPM, or word count observations |
 | No grammar/style policing | System prompt rule. Only hedge stacking triggers language critique |
 | Must reference transcript | System prompt rule. `text` field must contain actual words from transcript |
-| Only 4 flag types | Post-processing validation. Unknown types silently dropped |
+| Empty array for clean slides | System prompt rule. No forced feedback |
+
+### Layer 2: Pre-Computed Evidence
+| Constraint | Enforcement |
+|-----------|-------------|
+| REPETITION must be real | Pre-computed n-gram analysis confirms cross-slide repetitions before the LLM sees them. If none found, LLM is told "do NOT flag REPETITION" |
+| SLIDE_READING must be real | Similarity score computed between transcript and slide text. If < 0.5, LLM is told "do NOT flag SLIDE_READING" |
+| Slide boundaries are visible | Annotated transcript with `[Slide N]` markers prevents the LLM from guessing boundaries |
+
+### Layer 3: Post-Validation
+| Constraint | Enforcement |
+|-----------|-------------|
+| Quote exists in transcript | `text` field is checked against the normalized slide transcript. Fabricated quotes are dropped |
+| REPETITION is confirmed | Flagged phrase must match a pre-computed cross-slide n-gram. Hallucinated repetitions are dropped |
+| SLIDE_READING is confirmed | Similarity must be ≥ 0.5 and slide text must be present. Otherwise dropped |
+| Only 4 flag types | Unknown types silently dropped |
 | Under 200 characters | Post-processing truncation on both `text` and `detail` |
 | Max 2 per slide | Post-processing truncation |
-| Empty array for clean slides | System prompt rule. No forced feedback |
+| No banned phrases | Responses containing "great job", "well done", "excellent", etc. are filtered |
 
 **Post-processing filters:**
 
@@ -293,11 +330,6 @@ BANNED_PHRASES = [
     "nicely done", "impressive", "keep it up", "good job",
     "try to be more", "consider being more", "you should try"
 ]
-
-def filter_generic(text: str) -> bool:
-    """Return True if text should be kept."""
-    lower = text.lower()
-    return not any(phrase in lower for phrase in BANNED_PHRASES)
 ```
 
 ---
