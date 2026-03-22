@@ -1,9 +1,12 @@
 import asyncio
 import json
+import logging
 import os
 import tempfile
 import uuid
 from typing import Any
+
+logger = logging.getLogger("clara.pipeline")
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -54,6 +57,26 @@ async def _run_pipeline(
             presentations[presentation_id]["stage"] = PipelineStage.transcribing
             whisper_result = await transcribe_audio(audio_path)
 
+            # --- Diagnostic logging ---
+            words = whisper_result["words"]
+            logger.warning(
+                "[DIAG] Whisper returned %d words, duration=%.2f",
+                len(words), whisper_result["duration"],
+            )
+            if words:
+                logger.warning(
+                    "[DIAG] Word timestamps — first: start=%.3f end=%.3f (%s) | last: start=%.3f end=%.3f (%s)",
+                    words[0].start, words[0].end, words[0].word,
+                    words[-1].start, words[-1].end, words[-1].word,
+                )
+                unique_starts = set(w.start for w in words)
+                if len(unique_starts) <= 1:
+                    logger.warning("[DIAG] ALL word timestamps have the same start value: %s", unique_starts)
+            logger.warning(
+                "[DIAG] slide_timestamps=%s, total_slides=%d",
+                list(metadata.slide_timestamps), metadata.total_slides,
+            )
+
             # Stage: indexing (step 3/5)
             presentations[presentation_id]["stage"] = PipelineStage.indexing
             indexed = index_slides(
@@ -62,6 +85,13 @@ async def _run_pipeline(
                 total_slides=metadata.total_slides,
                 recording_duration=whisper_result["duration"],
             )
+
+            for sid, st in indexed.items():
+                logger.warning(
+                    "[DIAG] %s: range=[%.2f, %.2f) words=%d text=%s",
+                    sid, st.start_time, st.end_time, len(st.words),
+                    repr(st.text[:80]) if st.text else "(empty)",
+                )
 
             # Stage: analyzing (step 4/5) — parallel
             presentations[presentation_id]["stage"] = PipelineStage.analyzing

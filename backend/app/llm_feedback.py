@@ -1,7 +1,5 @@
 import asyncio
 import json
-import time
-import requests
 import snowflake.connector
 from typing import Dict, List
 
@@ -93,71 +91,67 @@ USER_PROMPT_TEMPLATE = (
 )
 
 # ---------------------------------------------------------------------------
-# Authentication
+# Snowflake connection
 # ---------------------------------------------------------------------------
 
 
-def _get_snowflake_token() -> str:
-    """Obtain a session token from Snowflake via the Python connector."""
-    conn = snowflake.connector.connect(
+def _get_snowflake_connection() -> snowflake.connector.SnowflakeConnection:
+    """Create a Snowflake connection for Cortex SQL calls."""
+    return snowflake.connector.connect(
         account=SNOWFLAKE_ACCOUNT,
         user=SNOWFLAKE_USER,
         password=SNOWFLAKE_PASSWORD,
         role=SNOWFLAKE_ROLE,
         warehouse=SNOWFLAKE_WAREHOUSE,
     )
-    token = conn.rest.token
-    conn.close()
-    return token
 
 
 # ---------------------------------------------------------------------------
-# Cortex REST call (synchronous)
+# Cortex SQL call (synchronous)
 # ---------------------------------------------------------------------------
 
 
-def _call_cortex(token: str, system_prompt: str, user_prompt: str) -> str:
+def _call_cortex(
+    conn: snowflake.connector.SnowflakeConnection,
+    system_prompt: str,
+    user_prompt: str,
+) -> str:
     """
-    POST to the Snowflake Cortex inference endpoint.
+    Call Snowflake Cortex COMPLETE via SQL.
     Returns the raw text content of the LLM reply.
-    Raises on non-200 after one retry; handles 429 with a 5-second wait.
     """
-    url = f"https://{SNOWFLAKE_ACCOUNT}.snowflakecomputing.com/api/v2/cortex/inference:complete"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": CORTEX_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 1024,
-    }
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    options = {"temperature": 0.3, "max_tokens": 1024}
 
-    def _do_request() -> requests.Response:
-        return requests.post(url, headers=headers, json=payload, timeout=60)
-
-    response = _do_request()
-
-    if response.status_code == 429:
-        time.sleep(5)
-        response = _do_request()
-
-    if response.status_code != 200:
-        time.sleep(2)
-        response = _do_request()
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"Cortex API error {response.status_code}: {response.text[:200]}"
+    query = "SELECT SNOWFLAKE.CORTEX.COMPLETE(%(model)s, PARSE_JSON(%(messages)s), PARSE_JSON(%(options)s))"
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            query,
+            {
+                "model": CORTEX_MODEL,
+                "messages": json.dumps(messages),
+                "options": json.dumps(options),
+            },
         )
+        row = cursor.fetchone()
+    finally:
+        cursor.close()
 
-    data = response.json()
-    # Standard OpenAI-compatible response shape used by Snowflake Cortex
-    return data["choices"][0]["message"]["content"]
+    if row is None:
+        raise RuntimeError("Cortex COMPLETE returned no result")
+
+    result = row[0]
+    # SQL COMPLETE returns a JSON string with {"choices":[{"messages":"..."}]}
+    if isinstance(result, str):
+        parsed = json.loads(result)
+    else:
+        parsed = result
+
+    return parsed["choices"][0]["messages"]
 
 
 # ---------------------------------------------------------------------------
@@ -217,42 +211,49 @@ async def generate_llm_feedback(
     Returns a dict keyed by slide_id (e.g. "slide_0") with SlideFeedback values.
     Every input slide has a corresponding output entry.
     """
-    token = await asyncio.to_thread(_get_snowflake_token)
+    conn = await asyncio.to_thread(_get_snowflake_connection)
 
-    total_slides = len(slide_transcript)
-    result: Dict[str, SlideFeedback] = {}
+    try:
+        total_slides = len(slide_transcript)
+        result: Dict[str, SlideFeedback] = {}
 
-    for slide_id, slide in slide_transcript.items():
-        # Empty slide — skip LLM call
-        if not slide.words:
-            result[slide_id] = SlideFeedback(feedback=[])
-            continue
+        for slide_id, slide in slide_transcript.items():
+            # Empty slide — skip LLM call
+            if not slide.words:
+                result[slide_id] = SlideFeedback(feedback=[])
+                continue
 
-        slide_duration = slide.end_time - slide.start_time
-        user_prompt = USER_PROMPT_TEMPLATE.format(
-            tone=expectations.tone.value,
-            expected_duration_minutes=expectations.expected_duration_minutes,
-            context=expectations.context,
-            full_transcript=full_text,
-            slide_number=slide.slide_index + 1,
-            total_slides=total_slides,
-            slide_text=slide.text,
-            slide_duration=round(slide_duration, 2),
-            slide_word_count=len(slide.words),
-        )
+            slide_duration = slide.end_time - slide.start_time
+            user_prompt = USER_PROMPT_TEMPLATE.format(
+                tone=expectations.tone.value,
+                expected_duration_minutes=expectations.expected_duration_minutes,
+                context=expectations.context,
+                full_transcript=full_text,
+                slide_number=slide.slide_index + 1,
+                total_slides=total_slides,
+                slide_text=slide.text,
+                slide_duration=round(slide_duration, 2),
+                slide_word_count=len(slide.words),
+            )
 
-        # First attempt — run blocking Cortex call off the event loop
-        try:
-            raw = await asyncio.to_thread(_call_cortex, token, SYSTEM_PROMPT, user_prompt)
-            feedback_items = _parse_llm_response(raw)
-        except json.JSONDecodeError:
-            # Retry once on invalid JSON
+            # First attempt — run blocking Cortex call off the event loop
             try:
-                raw = await asyncio.to_thread(_call_cortex, token, SYSTEM_PROMPT, user_prompt)
+                raw = await asyncio.to_thread(
+                    _call_cortex, conn, SYSTEM_PROMPT, user_prompt
+                )
                 feedback_items = _parse_llm_response(raw)
-            except (json.JSONDecodeError, Exception):
-                feedback_items = []
+            except json.JSONDecodeError:
+                # Retry once on invalid JSON
+                try:
+                    raw = await asyncio.to_thread(
+                        _call_cortex, conn, SYSTEM_PROMPT, user_prompt
+                    )
+                    feedback_items = _parse_llm_response(raw)
+                except (json.JSONDecodeError, Exception):
+                    feedback_items = []
 
-        result[slide_id] = SlideFeedback(feedback=feedback_items)
+            result[slide_id] = SlideFeedback(feedback=feedback_items)
+    finally:
+        conn.close()
 
     return result
