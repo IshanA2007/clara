@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api")
 
 MAX_AUDIO_BYTES = 100 * 1024 * 1024  # 100MB
 
-STAGE_STEPS: dict[str, tuple[int, str]] = {
+STAGE_STEPS: Dict[str, Tuple[int, str]] = {
     "received":    (1, "Upload received, queued for processing"),
     "transcribing": (2, "Transcribing audio"),
     "indexing":    (3, "Mapping transcript to slides"),
@@ -144,9 +144,9 @@ async def _run_pipeline(
         presentations[presentation_id]["error_message"] = str(e)
 
 
-def _error(error: str, message: str, status_code: int, field: str | None = None,
-           status: str | None = None, presentation_id: str | None = None) -> JSONResponse:
-    body: dict[str, Any] = {"error": error, "message": message}
+def _error(error: str, message: str, status_code: int, field: Optional[str] = None,
+           status: Optional[str] = None, presentation_id: Optional[str] = None) -> JSONResponse:
+    body: Dict[str, Any] = {"error": error, "message": message}
     if field is not None:
         body["field"] = field
     if status is not None:
