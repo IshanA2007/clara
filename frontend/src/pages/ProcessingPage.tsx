@@ -9,7 +9,7 @@ import type { PresentationMetadata } from '../types';
 
 export default function ProcessingPage() {
   const navigate = useNavigate();
-  const { audioBlob, slideTimestamps, expectations, totalSlides, presentationId, pdfFile } =
+  const { audioBlob, slideTimestamps, expectations, totalSlides, presentationId, pdfFile, previousAttemptId } =
     useAppState();
   const { setPresentationId, resetAll } = useAppActions();
 
@@ -50,9 +50,13 @@ export default function ProcessingPage() {
 
   useEffect(() => {
     if (isComplete && presentationId) {
-      navigate(`/results/${presentationId}`, { replace: true });
+      if (previousAttemptId) {
+        navigate(`/compare/${previousAttemptId}/${presentationId}`, { replace: true });
+      } else {
+        navigate(`/results/${presentationId}`, { replace: true });
+      }
     }
-  }, [isComplete, presentationId, navigate]);
+  }, [isComplete, presentationId, previousAttemptId, navigate]);
 
   const errorText = submitError || (isFailed ? errorMessage : null);
 

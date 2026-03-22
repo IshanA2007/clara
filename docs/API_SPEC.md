@@ -34,6 +34,7 @@ All error responses follow this structure:
 | POST | `/api/presentations` | Submit a presentation for processing |
 | GET | `/api/presentations/{id}/status` | Poll processing status |
 | GET | `/api/presentations/{id}/results` | Retrieve final results |
+| POST | `/api/presentations/{id}/chat` | Chat with AI coach about results |
 
 ---
 
@@ -341,6 +342,65 @@ Each feedback item in the `feedback` array:
 {
   "error": "not_ready",
   "message": "Processing is still in progress. Poll the status endpoint.",
+  "status": "processing"
+}
+```
+
+---
+
+## POST /api/presentations/{id}/chat
+
+Send a message to the AI coach for follow-up questions about this presentation's results.
+
+### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | `string (UUID)` | Presentation ID |
+
+### Request
+
+**Content-Type:** `application/json`
+
+```json
+{
+  "message": "Why do I keep saying 'kind of' so much on slide 3?"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `message` | string | Yes | User's question. Max 1000 characters. |
+
+### Response
+
+**Status:** `200 OK`
+
+```json
+{
+  "response": "On slide 3, you used 'kind of' 4 times within 30 seconds..."
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `response` | string | The AI coach's answer. |
+
+### Error Responses
+
+**404 Not Found:**
+```json
+{
+  "error": "not_found",
+  "message": "Presentation not found"
+}
+```
+
+**409 Conflict** — results not ready yet:
+```json
+{
+  "error": "not_ready",
+  "message": "Results must be available before starting a chat.",
   "status": "processing"
 }
 ```

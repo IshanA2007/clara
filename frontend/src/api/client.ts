@@ -3,6 +3,7 @@ import type {
   SubmitResponse,
   StatusResponse,
   PresentationResults,
+  ChatResponse,
   ApiError,
 } from '../types';
 
@@ -59,6 +60,27 @@ export async function getStatus(presentationId: string): Promise<StatusResponse>
 
 export async function getResults(presentationId: string): Promise<PresentationResults> {
   const res = await fetch(`${BASE_URL}/presentations/${presentationId}/results`);
+
+  if (res.ok) {
+    return res.json();
+  }
+
+  throw new ApiClientError(await parseErrorResponse(res));
+}
+
+export async function getAudioUrl(presentationId: string): Promise<string> {
+  const res = await fetch(`${BASE_URL}/presentations/${presentationId}/audio`);
+  if (!res.ok) throw new ApiClientError(await parseErrorResponse(res));
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export async function sendChatMessage(presentationId: string, message: string): Promise<ChatResponse> {
+  const res = await fetch(`${BASE_URL}/presentations/${presentationId}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
 
   if (res.ok) {
     return res.json();

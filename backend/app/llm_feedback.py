@@ -15,9 +15,11 @@ from app.config import (
     CORTEX_MODEL,
 )
 from app.models import (
+    CoachingTip,
     Expectations,
     FeedbackItem,
     FeedbackType,
+    PresentationResults,
     SlideFeedback,
     SlideTranscript,
 )
@@ -282,7 +284,16 @@ def _call_cortex(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    options = {"temperature": 0.1, "max_tokens": 1024}
+    return _call_cortex_messages(conn, messages)
+
+
+def _call_cortex_messages(
+    conn: snowflake.connector.SnowflakeConnection,
+    messages: List[Dict],
+    max_tokens: int = 1024,
+    temperature: float = 0.1,
+) -> str:
+    options = {"temperature": temperature, "max_tokens": max_tokens}
 
     query = "SELECT SNOWFLAKE.CORTEX.COMPLETE(%(model)s, PARSE_JSON(%(messages)s), PARSE_JSON(%(options)s))"
     cursor = conn.cursor()
@@ -514,3 +525,164 @@ async def generate_llm_feedback(
         conn.close()
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Coaching summary
+# ---------------------------------------------------------------------------
+
+COACHING_SYSTEM_PROMPT = """\
+You are a presentation coach providing a post-practice debrief. \
+Based on the complete analytics below, provide exactly 3 specific, \
+actionable coaching tips prioritized by impact.
+
+RULES:
+- Return exactly 3 tips as a JSON array.
+- Each tip: {"title": "...", "explanation": "...", "slide_references": ["slide_0", ...]}
+- "title": max 100 characters, a clear action item (verb-first).
+- "explanation": max 300 characters, reference specific data (slide numbers, \
+  word counts, specific phrases from the transcript).
+- "slide_references": the slide IDs most relevant to this tip.
+- Each tip must address a DIFFERENT aspect of the presentation.
+- Be concrete: "Replace 'kind of' with a deliberate pause" not "reduce filler words".
+- No praise, no encouragement, no generic advice like "practice more".
+- Respond ONLY with a valid JSON array. No markdown fences, no explanation."""
+
+
+def _build_coaching_context(results: PresentationResults) -> str:
+    om = results.overall_metrics
+    lines = [
+        "PRESENTATION OVERVIEW:",
+        f"- Total slides: {results.total_slides}",
+        f"- Duration: {om.actual_duration_seconds:.0f}s (expected {om.expected_duration_seconds:.0f}s, deviation {om.duration_deviation_seconds:+.0f}s)",
+        f"- Average WPM: {om.average_wpm:.0f}",
+        f"- Total filler words: {om.total_filler_count}",
+        f"- Total pauses: {om.total_pause_count}",
+        "",
+        "PER-SLIDE BREAKDOWN:",
+    ]
+    for slide_id in sorted(results.slides, key=lambda s: results.slides[s].slide_index):
+        s = results.slides[slide_id]
+        m = s.metrics
+        fb_strs = []
+        for fb in s.feedback:
+            fb_strs.append(f'{fb.type}: "{fb.text}"')
+        fb_line = "; ".join(fb_strs) if fb_strs else "none"
+        lines.append(
+            f"  {slide_id} (slide {s.slide_index + 1}): "
+            f"wpm={m.get('wpm', 0)}, pace={m.get('speaking_pace', '?')}, "
+            f"fillers={m.get('filler_words', {}).get('count', 0)}, "
+            f"pauses={m.get('pauses', {}).get('count', 0)}, "
+            f"feedback=[{fb_line}]"
+        )
+    lines.append("")
+    lines.append("FULL TRANSCRIPT:")
+    for slide_id in sorted(results.slides, key=lambda s: results.slides[s].slide_index):
+        s = results.slides[slide_id]
+        lines.append(f"  [Slide {s.slide_index + 1}]: {s.transcript}")
+
+    return "\n".join(lines)
+
+
+async def generate_coaching_summary(
+    results: PresentationResults,
+) -> List[CoachingTip]:
+    """Generate 3 prioritized coaching tips from the full presentation results."""
+    context = _build_coaching_context(results)
+    conn = await asyncio.to_thread(_get_snowflake_connection)
+    try:
+        raw = await asyncio.to_thread(
+            _call_cortex, conn, COACHING_SYSTEM_PROMPT, context
+        )
+        return _parse_coaching_tips(raw, results)
+    except Exception as exc:
+        logger.warning("Coaching summary generation failed: %s", exc)
+        return []
+    finally:
+        conn.close()
+
+
+def _parse_coaching_tips(raw: str, results: PresentationResults) -> List[CoachingTip]:
+    json_str = _extract_json_array(raw)
+    items = json.loads(json_str)
+    if not isinstance(items, list):
+        return []
+
+    valid_slide_ids = set(results.slides.keys())
+    tips: List[CoachingTip] = []
+
+    for item in items[:3]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        explanation = str(item.get("explanation", "")).strip()
+        refs = item.get("slide_references", [])
+
+        if not title or not explanation:
+            continue
+        if len(title) > 100:
+            title = title[:97] + "..."
+        if len(explanation) > 300:
+            explanation = explanation[:297] + "..."
+
+        if not isinstance(refs, list):
+            refs = []
+        refs = [r for r in refs if isinstance(r, str) and r in valid_slide_ids]
+
+        tips.append(CoachingTip(
+            title=title,
+            explanation=explanation,
+            slide_references=refs,
+        ))
+
+    return tips
+
+
+# ---------------------------------------------------------------------------
+# Chat with AI coach
+# ---------------------------------------------------------------------------
+
+CHAT_SYSTEM_TEMPLATE = """\
+You are Clara, an AI presentation coach. A student just finished a practice \
+presentation and is reviewing their analytics. Answer their questions about \
+their performance using the data below.
+
+{context}
+
+RULES:
+- Reference specific slides, timestamps, and phrases from the transcript.
+- Be direct, specific, and concise (under 250 words).
+- Add insight beyond what the raw numbers show — explain WHY a pattern matters.
+- If they ask about a specific slide, quote relevant parts of their transcript.
+- Don't repeat data they can already see. Add interpretation and actionable advice.
+- Stay focused on this presentation's data. No generic self-help.
+- No praise or encouragement. Just coaching."""
+
+
+async def generate_chat_response(
+    results: PresentationResults,
+    chat_history: List[Dict[str, str]],
+    user_message: str,
+) -> str:
+    """Generate a chat response using full presentation context + conversation history."""
+    context = _build_coaching_context(results)
+    system_prompt = CHAT_SYSTEM_TEMPLATE.format(context=context)
+
+    messages: List[Dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+    ]
+    for msg in chat_history:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_message})
+
+    conn = await asyncio.to_thread(_get_snowflake_connection)
+    try:
+        raw = await asyncio.to_thread(
+            _call_cortex_messages, conn, messages, max_tokens=1024, temperature=0.3
+        )
+        return raw.strip()
+    except Exception as exc:
+        logger.warning("Chat response generation failed: %s", exc)
+        raise
+    finally:
+        conn.close()

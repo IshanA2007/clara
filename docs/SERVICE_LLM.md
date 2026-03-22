@@ -394,6 +394,51 @@ Every slide in the input must have a corresponding entry in the output, even if 
 
 ---
 
+## Coaching Summary Generation
+
+After all per-slide feedback is generated and results are aggregated, a single additional Cortex call generates an overall coaching summary.
+
+### Input
+The full aggregated results: all slide transcripts, metrics, per-slide feedback, overall metrics, and expectations.
+
+### Output
+Exactly 3 coaching tips, each with:
+- `title`: short actionable heading (max 100 chars)
+- `explanation`: detailed guidance referencing specific data (max 300 chars)
+- `slide_references`: list of slide IDs most relevant to the tip
+
+### Prompt Design
+The coaching summary prompt receives a structured summary of the entire presentation and asks the LLM to prioritize the 3 most impactful improvements. Rules:
+- Tips must be specific and reference concrete data (slide numbers, word counts, specific phrases)
+- No generic advice ("practice more", "be confident")
+- No praise or encouragement
+- Each tip should address a different aspect of the presentation
+
+---
+
+## Chat / Conversational Follow-Up
+
+The chat endpoint allows users to ask follow-up questions about their presentation results. The LLM receives full presentation context as a system prompt and maintains conversation history per presentation.
+
+### System Context
+The chat system prompt includes:
+- Full annotated transcript
+- All per-slide metrics and feedback
+- Overall metrics
+- Coaching summary tips
+- Presentation expectations (tone, context, duration)
+
+### Conversation History
+Maintained in-memory as a list of `{role, content}` dicts on the presentation record. History is included in each Cortex call so the LLM can maintain conversational coherence.
+
+### Rules
+- Reference specific transcript data when answering
+- Don't repeat information already visible in the UI
+- Stay focused on this presentation's data
+- No generic self-help advice
+
+---
+
 ## Snowflake Compliance
 
 - All LLM inference MUST go through Snowflake Cortex

@@ -108,12 +108,23 @@ export interface OverallMetrics {
   duration_deviation_seconds: number;
 }
 
+export interface CoachingTip {
+  title: string;
+  explanation: string;
+  slide_references: string[];
+}
+
 export interface PresentationResults {
   presentation_id: string;
   total_slides: number;
   total_duration_seconds: number;
   overall_metrics: OverallMetrics;
+  coaching_summary: CoachingTip[];
   slides: Record<string, SlideResult>;
+}
+
+export interface ChatResponse {
+  response: string;
 }
 
 export interface ApiError {

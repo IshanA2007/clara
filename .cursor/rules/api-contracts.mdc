@@ -18,6 +18,7 @@ Only these three endpoints exist. Do not invent others.
 | POST | `/api/presentations` | Submit presentation for processing |
 | GET | `/api/presentations/{id}/status` | Poll processing status |
 | GET | `/api/presentations/{id}/results` | Retrieve final results |
+| POST | `/api/presentations/{id}/chat` | Chat with AI coach about results |
 
 **Base URL:** `http://localhost:8000/api`
 

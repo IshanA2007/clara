@@ -124,11 +124,17 @@ class OverallMetrics(BaseModel):
     actual_duration_seconds: float
     duration_deviation_seconds: float
 
+class CoachingTip(BaseModel):
+    title: str = Field(max_length=100)
+    explanation: str = Field(max_length=300)
+    slide_references: List[str]
+
 class PresentationResults(BaseModel):
     presentation_id: str
     total_slides: int
     total_duration_seconds: float
     overall_metrics: OverallMetrics
+    coaching_summary: List[CoachingTip]
     slides: Dict[str, AggregatedSlide]
 
 # --- API response types ---
@@ -150,6 +156,12 @@ class StatusResponse(BaseModel):
     progress: Optional[ProgressInfo] = None
     error: Optional[str] = None
     message: Optional[str] = None
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+
+class ChatResponse(BaseModel):
+    response: str
 
 class ErrorResponse(BaseModel):
     error: str

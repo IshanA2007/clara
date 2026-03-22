@@ -11,13 +11,15 @@ import fitz  # PyMuPDF
 logger = logging.getLogger("clara.pipeline")
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.aggregator import aggregate_results
 from app.indexer import index_slides
-from app.llm_feedback import generate_llm_feedback
+from app.llm_feedback import generate_llm_feedback, generate_coaching_summary, generate_chat_response
 from app.manual_analytics import compute_manual_analytics
 from app.models import (
+    ChatRequest,
+    ChatResponse,
     ErrorResponse,
     PipelineStage,
     PresentationMetadata,
@@ -131,8 +133,16 @@ async def _run_pipeline(
                 presentation_id=presentation_id,
             )
 
+            # Generate coaching summary (post-aggregation LLM call)
+            try:
+                coaching_tips = await generate_coaching_summary(results)
+                results.coaching_summary = coaching_tips
+            except Exception as coaching_exc:
+                logger.warning("Coaching summary failed, continuing without: %s", coaching_exc)
+
             presentations[presentation_id]["status"] = ProcessingStatus.completed
             presentations[presentation_id]["results"] = results
+            presentations[presentation_id]["chat_history"] = []
 
         finally:
             if os.path.exists(audio_path):
@@ -224,6 +234,7 @@ async def create_presentation(
         "metadata": meta,
         "results": None,
         "error_message": None,
+        "audio_bytes": audio_bytes,
     }
 
     # Read optional PDF for SLIDE_READING detection
@@ -293,6 +304,67 @@ async def get_status(presentation_id: str, request: Request) -> JSONResponse:
             ),
         ).model_dump(exclude_none=True),
     )
+
+
+@router.post("/presentations/{presentation_id}/chat")
+async def chat(presentation_id: str, request: Request) -> JSONResponse:
+    presentations = request.app.presentations  # type: ignore[attr-defined]
+
+    record = presentations.get(presentation_id)
+    if record is None:
+        return _error("not_found", "Presentation not found", 404)
+
+    if record["status"] != ProcessingStatus.completed:
+        return _error(
+            "not_ready",
+            "Results must be available before starting a chat.",
+            409,
+            status="processing",
+        )
+
+    body = await request.json()
+    try:
+        chat_req = ChatRequest(**body)
+    except Exception as exc:
+        return _error("validation_error", str(exc), 400, field="message")
+
+    results: PresentationResults = record["results"]
+    chat_history: list = record.get("chat_history", [])
+
+    try:
+        response_text = await generate_chat_response(
+            results, chat_history, chat_req.message
+        )
+    except Exception as exc:
+        logger.warning("Chat response failed: %s", exc)
+        return _error("processing_failed", "Failed to generate chat response", 500)
+
+    chat_history.append({"role": "user", "content": chat_req.message})
+    chat_history.append({"role": "assistant", "content": response_text})
+    record["chat_history"] = chat_history
+
+    return JSONResponse(
+        status_code=200,
+        content=ChatResponse(response=response_text).model_dump(),
+    )
+
+
+@router.get("/presentations/{presentation_id}/audio")
+async def get_audio(presentation_id: str, request: Request):
+    presentations = request.app.presentations  # type: ignore[attr-defined]
+
+    record = presentations.get(presentation_id)
+    if record is None:
+        return _error("not_found", "Presentation not found", 404)
+
+    if record["status"] == ProcessingStatus.processing:
+        return _error("not_ready", "Still processing", 409, status="processing")
+
+    audio = record.get("audio_bytes")
+    if not audio:
+        return _error("not_found", "Audio not available", 404)
+
+    return Response(content=audio, media_type="audio/webm")
 
 
 @router.get("/presentations/{presentation_id}/results")
