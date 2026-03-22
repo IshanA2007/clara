@@ -31,6 +31,11 @@
   --pace-normal: #3A7D5E;
   --pace-fast: #B5862A;
 
+  /* Semantic — pause severity */
+  --pause-warning: #A13B3B;
+  --pause-warning-bg: rgba(161, 59, 59, 0.07);
+  --pause-warning-border: rgba(161, 59, 59, 0.25);
+
   /* Severity */
   --severity-observation: var(--text-secondary);
   --severity-suggestion: var(--accent);
