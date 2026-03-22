@@ -1,6 +1,6 @@
 # Clara
 
-**Game film review for presentations.** Clara records you presenting over your slides, then breaks down exactly what happened — slide by slide, word by word.
+**Game film review for presentations.** Clara records you presenting over your slides, then breaks down exactly what happened slide by slide.
 
 Upload a PDF, give your talk, and get back per-slide telemetry: speaking pace, filler words, pauses, cross-slide repetition, hedge stacking, false starts, and slide reading detection. Just what you did and where, without scores or generic "great job" feedback.
 
